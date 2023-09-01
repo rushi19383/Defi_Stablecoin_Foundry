@@ -59,6 +59,7 @@ contract DSCEngine is ReentrancyGuard {
     error DSCEngine__BreakHealthFactor(uint256 healthFactor);
     error DSCEngine__MintFailed();
     error DSCEngine__HealthFactorOk();
+    error DSCEngine__HealthFactorNotImproved();
 
     ///////////////////////////////////////////
     // State Variable                       //
@@ -73,7 +74,7 @@ contract DSCEngine is ReentrancyGuard {
 
     mapping(address token => address priceFeed) private s_priceFeeds; //tokenToPriceFeed
     mapping(address user => mapping(address token => uint256 amount)) private s_collateralDeposited;
-    mapping(address user => uint256 amountDscMinted) private s_DSCMinted;
+    mapping(address user => uint256 amount) private s_DSCMinted;
 
     DecentralizedStableCoin private immutable i_dsc;
     address[] private s_collateralTokens;
@@ -237,6 +238,13 @@ contract DSCEngine is ReentrancyGuard {
         uint256 bonusCollateral = (tokenAmountFromDebtCovered * LIQUIDATION_BONUS) / LIQUIDATION_PRECISION;
         uint256 totalCollateralToRedeem = tokenAmountFromDebtCovered + bonusCollateral;
         _redeemCollateral(user, msg.sender, collateral, totalCollateralToRedeem);
+        //WE need to burn the DSC
+        _burnDsc(user, msg.sender, debtToCover);
+
+        uint256 endingUserHealthFactor = _healthFactor(user);
+        if (endingUserHealthFactor <= startingUserHealthFactor) {
+            revert DSCEngine__HealthFactorNotImproved();
+        }
     }
 
     function getHealthFactor() external {}
@@ -277,7 +285,7 @@ contract DSCEngine is ReentrancyGuard {
         returns (uint256 totalDscMinted, uint256 collateralValueInUsd)
     {
         totalDscMinted = s_DSCMinted[user];
-        collateralValueInUsd = getAccuntCollateralValue(user);
+        collateralValueInUsd = getAccountCollateralValue(user);
     }
 
     //returns how close liquidation a user is
@@ -318,7 +326,7 @@ contract DSCEngine is ReentrancyGuard {
         return ((usdAmountInWei * (PRECISION)) / (uint256(price) * ADDITION_FEED_PRECISION));
     }
 
-    function getAccuntCollateralValue(address user) public view returns (uint256 totalCollateralValueInUsd) {
+    function getAccountCollateralValue(address user) public view returns (uint256 totalCollateralValueInUsd) {
         //loop through each collateral token, get the amount they have deposited, map it to
         //the price, to get the USD value
 
@@ -337,5 +345,13 @@ contract DSCEngine is ReentrancyGuard {
         // the returned value from CL  will be 1000*1e8
 
         return ((uint256(price) * ADDITION_FEED_PRECISION) * amount) / PRECISION;
+    }
+
+    function getAccountInformation(address user)
+        external
+        view
+        returns (uint256 totalDscMinted, uint256 collateralValueInUsd)
+    {
+        return _getAccountInformation(user);
     }
 }
